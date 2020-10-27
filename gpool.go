@@ -13,17 +13,15 @@ type Job func()
 
 // 工人
 type worker struct {
-	workerQueue chan *worker  // 主工人队列
-	jobChannel  chan Job      // 工作任务
-	stop        chan struct{} // 停止信号
+	jobChannel chan Job      // 工作任务
+	stop       chan struct{} // 停止信号
 }
 
-// 开始工作
-func (w *worker) Start() {
+// 准备好
+func (w *worker) Ready() {
 	go func() {
 		var job Job
 		for {
-			w.workerQueue <- w // 重新加入队列
 			select {
 			case job = <-w.jobChannel: // 等待任务
 				job()
@@ -35,12 +33,22 @@ func (w *worker) Start() {
 	}()
 }
 
+// 做任务
+func (w *worker) Do(job Job) {
+	w.jobChannel <- job
+}
+
+// 停止
+func (w *worker) Stop() {
+	w.stop <- struct{}{}
+	<-w.stop
+}
+
 // 创建一个工人
 func newWorker(pool chan *worker) *worker {
 	return &worker{
-		workerQueue: pool,
-		jobChannel:  make(chan Job),
-		stop:        make(chan struct{}),
+		jobChannel: make(chan Job),
+		stop:       make(chan struct{}),
 	}
 }
 
@@ -54,12 +62,9 @@ type Pool struct {
 // 创建协程池
 // numWorkers表示工人数, jobQueueLen表示任务数, 如果任务队列已满还添加则会等待任务队列出现空缺
 func NewPool(numWorkers int, jobQueueLen int) *Pool {
-	workerQueue := make(chan *worker, numWorkers)
-	jobQueue := make(chan Job, jobQueueLen)
-
 	pool := &Pool{
-		workerQueue: workerQueue,
-		jobQueue:    jobQueue,
+		workerQueue: make(chan *worker, numWorkers),
+		jobQueue:    make(chan Job, jobQueueLen),
 		stop:        make(chan struct{}),
 	}
 	return pool
@@ -69,7 +74,8 @@ func NewPool(numWorkers int, jobQueueLen int) *Pool {
 func (p *Pool) Start() {
 	for i := 0; i < cap(p.workerQueue); i++ {
 		worker := newWorker(p.workerQueue)
-		worker.Start()
+		worker.Ready()
+		p.workerQueue <- worker
 	}
 
 	go p.dispatch()
@@ -85,20 +91,26 @@ func (p *Pool) dispatch() {
 	for {
 		select {
 		case job := <-p.jobQueue:
-			worker := <-p.workerQueue
-			worker.jobChannel <- job
+			p.solve(job)
 		case <-p.stop:
 			for i := 0; i < cap(p.workerQueue); i++ {
 				worker := <-p.workerQueue
-
-				worker.stop <- struct{}{}
-				<-worker.stop
+				worker.Stop()
 			}
 
 			p.stop <- struct{}{}
 			return
 		}
 	}
+}
+
+// 解决任务
+func (p *Pool) solve(job Job) {
+	worker := <-p.workerQueue
+	worker.Do(func() {
+		job()
+		p.workerQueue <- worker
+	})
 }
 
 // 停止
