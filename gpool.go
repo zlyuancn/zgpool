@@ -8,6 +8,10 @@
 
 package zgpool
 
+import (
+	"sync"
+)
+
 // 任务
 type Job func()
 
@@ -57,6 +61,8 @@ type Pool struct {
 	workerQueue chan *worker // 工人队列
 	jobQueue    chan Job     // 任务队列
 	stop        chan struct{}
+
+	wg sync.WaitGroup
 }
 
 // 创建协程池
@@ -83,6 +89,7 @@ func (p *Pool) Start() {
 
 // 添加任务
 func (p *Pool) Go(job Job) {
+	p.wg.Add(1)
 	p.jobQueue <- job
 }
 
@@ -109,6 +116,7 @@ func (p *Pool) solve(job Job) {
 	worker := <-p.workerQueue
 	worker.Do(func() {
 		job()
+		p.wg.Done()
 		p.workerQueue <- worker
 	})
 }
@@ -118,4 +126,9 @@ func (p *Pool) solve(job Job) {
 func (p *Pool) Stop() {
 	p.stop <- struct{}{}
 	<-p.stop
+}
+
+// 等待所有任务结束
+func (p *Pool) Wait() {
+	p.wg.Wait()
 }
