@@ -88,9 +88,20 @@ func (p *Pool) Start() {
 }
 
 // 添加任务
-func (p *Pool) Go(job Job) {
+func (p *Pool) AddJob(job Job) {
 	p.wg.Add(1)
 	p.jobQueue <- job
+}
+
+// 尝试添加任务, 如果任务队列已满则返回false
+func (p *Pool) TryAddJob(job Job) bool {
+	select {
+	case p.jobQueue <- job:
+		p.wg.Add(1)
+		return true
+	default:
+		return false
+	}
 }
 
 // 为工人派遣任务
