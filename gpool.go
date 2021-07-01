@@ -18,7 +18,7 @@ type Job func()
 // 工人
 type worker struct {
 	jobChannel chan Job      // 工作任务
-	stop       chan struct{} // 停止信号
+	stop       chan struct{} // 停止信号, 同步通道
 }
 
 // 准备好
@@ -49,7 +49,7 @@ func (w *worker) Stop() {
 }
 
 // 创建一个工人
-func newWorker(pool chan *worker) *worker {
+func newWorker() *worker {
 	return &worker{
 		jobChannel: make(chan Job),
 		stop:       make(chan struct{}),
@@ -58,15 +58,15 @@ func newWorker(pool chan *worker) *worker {
 
 // 协程池
 type Pool struct {
-	workerQueue chan *worker // 工人队列
-	jobQueue    chan Job     // 任务队列
-	stop        chan struct{}
+	workerQueue chan *worker  // 工人队列
+	jobQueue    chan Job      // 任务队列
+	stop        chan struct{} // 停止信号, 同步通道
 
 	wg sync.WaitGroup
 }
 
 // 创建协程池
-// numWorkers表示工人数, jobQueueLen表示任务数, 如果任务队列已满还添加则会等待任务队列出现空缺
+// numWorkers表示工人数, jobQueueLen表示任务队列数, 如果任务队列已满还添加则会等待任务队列出现空缺
 func NewPool(numWorkers int, jobQueueLen int) *Pool {
 	pool := &Pool{
 		workerQueue: make(chan *worker, numWorkers),
@@ -79,7 +79,7 @@ func NewPool(numWorkers int, jobQueueLen int) *Pool {
 // 起飞
 func (p *Pool) Start() {
 	for i := 0; i < cap(p.workerQueue); i++ {
-		worker := newWorker(p.workerQueue)
+		worker := newWorker()
 		worker.Ready()
 		p.workerQueue <- worker
 	}
@@ -95,11 +95,12 @@ func (p *Pool) AddJob(job Job) {
 
 // 尝试添加任务, 如果任务队列已满则返回false
 func (p *Pool) TryAddJob(job Job) bool {
+	p.wg.Add(1)
 	select {
 	case p.jobQueue <- job:
-		p.wg.Add(1)
 		return true
 	default:
+		p.wg.Done()
 		return false
 	}
 }
